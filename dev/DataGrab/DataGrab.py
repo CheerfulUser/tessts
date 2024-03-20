@@ -19,7 +19,7 @@ from astropy.io.fits import getdata
 from astropy.table import Table
 from astropy import wcs
 
-from downloader import Download_cam_ccd_FFIs
+from DataDownloader import Download_cam_ccd_FFIs
 
 def _Save_space(Save,delete=False):
     """
@@ -162,6 +162,7 @@ class DataGrab():
         
         for cam,ccd in combinations:
             if self.verbose > 0:
+                print('\n')
                 _Print_buff(50,f'Downloading Sector {self.sector} Cam {cam} CCD {ccd}')
             Download_cam_ccd_FFIs(self.path,self.sector,cam,ccd,time,lower,upper,number=number) 
     
@@ -221,11 +222,11 @@ class DataGrab():
             ax.add_patch(rectangleTotal)
                 
             # -- Adds cuts -- #
-            colours = iter(plt.cm.rainbow(np.linspace(0, 1, n)))
+            colours = iter(plt.cm.rainbow(np.linspace(0, 1, n**2)))
 
-            for corner in enumerate(cutCorners):
+            for corner in cutCorners:
                 c = next(colours)
-                rectangle = patches.Rectangle(corner,cutSize,cutSize,edgecolor=c,
+                rectangle = patches.Rectangle(corner,2*cutSize,2*cutSize,edgecolor=c,
                                               facecolor='none',alpha=1)
                 ax.add_patch(rectangle)
                 
@@ -334,26 +335,109 @@ class DataGrab():
         cube_name = f'sector{self.sector}_cam{cam}_ccd{ccd}_cube.fits'
         cube_path = f'{file_path}/{cube_name}'
 
+        cuts = np.linspace(1,n**2,n**2).astype(int)
+
         # -- Iterate through cuts, if not already made, make cut -- #
-        for i, coords in enumerate(cutCentreCoords):
-            name = f'sector{self.sector}_cam{cam}_ccd{ccd}_cut{i+1}_of{n**2}.fits'
-            if os.path.exists(f'{file_path}/{name}'):
-                print(f'Cam {cam} CCD {ccd} cut {i+1} already made!')
+        for cut in cuts:
+            name = f'sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}.fits'
+            if os.path.exists(f'{file_path}/Cut{cut}of{n**2}/{name}'):
+                print(f'Cam {cam} CCD {ccd} cut {cut} already made!')
             else:
                 if self.verbose > 0:
-                    print(f'Cutting Cam {cam} CCD {ccd} cut {i+1} (of {n**2})')
+                    print(f'Cutting Cam {cam} CCD {ccd} cut {cut} (of {n**2})')
                 
                 my_cutter = CutoutFactory() # astrocut class
-                coords = cutCentreCoords[i]
+                coords = cutCentreCoords[cut-1]
+
+                _Save_space(f'{file_path}/Cut{cut}of{n**2}')
                                 
                 # -- Cut -- #
                 self.cut_file = my_cutter.cube_cut(cube_path, 
                                                     f"{coords[0]} {coords[1]}", 
                                                     (cutSize,cutSize), 
-                                                    output_path = file_path,
+                                                    output_path = f'{file_path}/Cut{cut}of{n**2}',
                                                     target_pixel_file = name,
                                                     verbose=(self.verbose>1)) 
 
                 if self.verbose > 0:
-                    print(f'Cam {cam} CCD {ccd} cut {i+1} complete.')
+                    print(f'Cam {cam} CCD {ccd} cut {cut} complete.')
                     print('\n')
+
+    def reduce(self,cam,ccd,n,cut=None):
+        """
+        Reduces all cuts on a ccd using TESSreduce. bkg correlation 
+        correction and final calibration are disabled due to time constraints.
+        
+        ------
+        Inputs
+        ------
+        cam : int
+            desired camera
+        ccd : int
+            desired ccd
+        n : int
+            n**2 split cuts
+
+        -------
+        Creates
+        -------
+        Fits file in path with reduced data.
+
+        """
+
+        # -- Calling find_cuts() -- #
+        if cut is None:
+            cuts = np.linspace(1,n**2,n**2).astype(int)
+        else:
+            cuts = [cut]
+        
+        filepath = f'{self.path}/Cam{cam}Ccd{ccd}'
+
+        # -- Iterate over cuts to generate new FITS files with reduced photometric data -- #
+        for cut in cuts:
+            cutFolder = f'{filepath}/Cut{cut}of{n**2}'
+            cutName = f'sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}.fits'
+            cutPath = f'{cutFolder}/{cutName}'
+
+            fluxName = f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_ReducedFlux.npy'
+            maskName = f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_Mask.npy'
+            timesName = f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_Times.npy'
+
+            if os.path.exists(fluxName):
+                if self.verbose > 0:
+                    print(f'Cam {cam} Chip {ccd} cut {cut} already reduced!')
+            else:
+                ts = t()
+                if self.verbose > 0:
+                    print('\n')
+                    print(f'--Reduction Cam {cam} Chip {ccd} Cut {cut} (of {n**2})--')
+                
+                try: 
+                    # -- Defining so can be deleted if failed -- #
+                    tessreduce = 0
+
+                    # -- reduce -- #
+                    tessreduce = tr.tessreduce(tpf=cutPath,sector=self.sector,reduce=True,corr_correction=False,
+                                               calibrate=False,catalogue_path=cutFolder)
+                    
+                    if self.verbose > 0:
+                        print(f'--Reduction Complete (Time: {((t()-ts)/60):.2f} mins)--')
+                    #tw = t()   # write timeStart
+                    
+                    # -- Saves information out as Numpy Arrays -- #
+                    np.save(f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_ReducedFlux.npy',tessreduce.flux)
+                    np.save(f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_Mask.npy',tessreduce.mask)
+                    np.save(f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_Times.npy',tessreduce.lc[0])
+
+                    # if self.verbose > 0:
+                    #     print(f'--Writing Complete (Time: {(t()-ts):.2f} secs)--')
+                    #     print('\n')
+
+                except:
+                    # -- Deletes Memory -- #
+                    del(tessreduce)
+
+                    if self.verbose > 0:
+                        print(f'Reducing Cam {cam} Chip {ccd} Cut {cut} Failed :( Time Elapsed: {((t()-ts)/60):.2f} mins.')
+                        print('\n')
+                    pass 

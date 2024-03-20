@@ -48,11 +48,13 @@ def Download_cam_ccd_FFIs(path,sector,cam,ccd,time,lower,upper,number):
     Downloads FFIs of interest (each ~34 MB).
     """
     homepath = os.getcwd() 
-    
-    if not glob('*.sh'):    # gets base download file from MAST
+
+    if not glob(f'{path}/*_ffic.sh'):    # gets base download file from MAST
+        os.chdir(path)
         os.system(f'curl --silent -O https://archive.stsci.edu/missions/tess/download_scripts/sector/tesscurl_sector_{sector}_ffic.sh')
-    
-    with open(f'tesscurl_sector_{sector}_ffic.sh') as file:
+        os.chdir(homepath)
+
+    with open(f'{path}/tesscurl_sector_{sector}_ffic.sh') as file:
         filelines = file.readlines()
 
     # -- If base path is not temporary, creates a subdirectory -- #
@@ -69,11 +71,13 @@ def Download_cam_ccd_FFIs(path,sector,cam,ccd,time,lower,upper,number):
     goodlines = Parallel(n_jobs=multiprocessing.cpu_count())(delayed(_find_lines)(file,cam,ccd,time,lower,upper) for file in filelines)
     goodlines = np.array(goodlines)
     goodlines = goodlines[goodlines!=None]
-
-    inds = np.linspace(0,len(goodlines)-1,len(goodlines)).astype(int)
     
     # -- If all are to be downloaded, download in parallel -- #
     if number is None:
+        inds = np.linspace(0,len(goodlines)-1,len(goodlines)).astype(int)
+        Parallel(n_jobs=multiprocessing.cpu_count())(delayed(_download_line)(goodlines[ind]) for ind in tqdm(inds))
+    elif number > 10:
+        inds = np.linspace(0,number-1,number).astype(int)
         Parallel(n_jobs=multiprocessing.cpu_count())(delayed(_download_line)(goodlines[ind]) for ind in tqdm(inds))
     else:
         for i in range(number):     # download {number} files from the goodlines
