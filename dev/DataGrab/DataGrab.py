@@ -166,7 +166,7 @@ class DataGrab():
                 _Print_buff(50,f'Downloading Sector {self.sector} Cam {cam} CCD {ccd}')
             Download_cam_ccd_FFIs(self.path,self.sector,cam,ccd,time,lower,upper,number=number) 
     
-    def find_cuts(self,cam,ccd,n,plot=True,proj=True):
+    def find_cuts(self,cam,ccd,n,plot=True,proj=True,coord=None):
         """
         Function for finding cuts.
 
@@ -187,6 +187,8 @@ class DataGrab():
             if True, plot cuts 
         proj : bool
             if True, plot cuts with WCS grid
+        coord : (ra,dec)
+            if not None, plots coord 
         
         """
 
@@ -209,6 +211,11 @@ class DataGrab():
                 ax.set_ylabel(' ')
             else:
                 ax = plt.subplot()
+
+            if coord is not None:
+                coordPx = wcsItem.all_world2pix(coord[0],coord[1],0)
+                ax.scatter(coordPx[0],coordPx[1],s=10)
+                ax.text(x=coordPx[0],y=coordPx[1]+10,s=f'{coordPx[0]:.1f},{coordPx[1]:.1f}')
             
             # -- Real rectangle edge -- #
             rectangleTotal = patches.Rectangle((44,0), 2048, 2048,edgecolor='black',facecolor='none',alpha=0.5)
@@ -354,7 +361,7 @@ class DataGrab():
                 # -- Cut -- #
                 self.cut_file = my_cutter.cube_cut(cube_path, 
                                                     f"{coords[0]} {coords[1]}", 
-                                                    (cutSize,cutSize), 
+                                                    (cutSize*2,cutSize*2), 
                                                     output_path = f'{file_path}/Cut{cut}of{n**2}',
                                                     target_pixel_file = name,
                                                     verbose=(self.verbose>1)) 
@@ -418,20 +425,18 @@ class DataGrab():
 
                     # -- reduce -- #
                     tessreduce = tr.tessreduce(tpf=cutPath,sector=self.sector,reduce=True,corr_correction=False,
-                                               calibrate=False,catalogue_path=cutFolder)
+                                                calibrate=False,catalogue_path=cutFolder)
                     
                     if self.verbose > 0:
                         print(f'--Reduction Complete (Time: {((t()-ts)/60):.2f} mins)--')
                     #tw = t()   # write timeStart
                     
                     # -- Saves information out as Numpy Arrays -- #
+                    np.save(f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_Times.npy',tessreduce.lc[0])
                     np.save(f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_ReducedFlux.npy',tessreduce.flux)
                     np.save(f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_Mask.npy',tessreduce.mask)
-                    np.save(f'{cutFolder}/sector{self.sector}_cam{cam}_ccd{ccd}_cut{cut}_of{n**2}_Times.npy',tessreduce.lc[0])
 
-                    # if self.verbose > 0:
-                    #     print(f'--Writing Complete (Time: {(t()-ts):.2f} secs)--')
-                    #     print('\n')
+                    del (tessreduce)
 
                 except:
                     # -- Deletes Memory -- #

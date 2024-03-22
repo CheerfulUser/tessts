@@ -182,8 +182,9 @@ def unknown_mask(image):
 
 
 def _parallel_bkg3(data,mask):
-	data[mask] = np.nan
-	estimate = inpaint.inpaint_biharmonic(data,mask)
+	d = deepcopy(data)
+	d[mask] = np.nan
+	estimate = inpaint.inpaint_biharmonic(d,mask)
 	return estimate
 
 def Smooth_bkg(data, gauss_smooth=2, interpolate=False, extrapolate=True):
@@ -590,10 +591,10 @@ def spacetime_lookup(ra,dec,time=None,buffer=0,print_table=True):
 				dif = ds
 			covers += [cover]
 			differences += [dif]
-			tab += [[secs.Sector.values[i], outCam[i], outCcd[i], cover, dif]]
-			tr_list += [[ra, dec, secs.Sector.values[i],outCam[i], outCcd[i], cover]]
+			tab += [[secs.Sector.values[i], cover, dif]]
+			tr_list += [[ra, dec, secs.Sector.values[i], cover]]
 		if print_table: 
-			print(tabulate(tab, headers=['Sector', 'Camera', 'CCD', 'Covers','Time difference \n(days)'], tablefmt='orgtbl'))
+			print(tabulate(tab, headers=['Sector', 'Covers','Time difference \n(days)'], tablefmt='orgtbl'))
 		return tr_list
 	else:
 		print('No TESS coverage')
@@ -622,6 +623,7 @@ def _par_psf_flux(image,prf,shift=[0,0]):
 	prf.psf_flux(image,ext_shift=shift)
 	return prf.flux
 
+
 def external_save_TESS(ra,dec,sector,size=90,quality_bitmask='default',cache_dir=None):
 
 	c = SkyCoord(ra=float(ra)*u.degree, dec=float(dec) * u.degree, frame='icrs')
@@ -648,7 +650,8 @@ def external_get_TESS():
 				print('Too Many tpfs here!')
 	tpf = lk.TessTargetPixelFile(target)
 	return tpf
-		 
+
+
 class tessreduce():
 
 	def __init__(self,ra=None,dec=None,name=None,obs_list=None,tpf=None,size=90,sector=None,reduce=True,
@@ -680,6 +683,7 @@ class tessreduce():
 			self.num_cores = multiprocessing.cpu_count()
 		else:
 			self.num_cores = num_cores
+
 
 		# Plotting
 		self.plot = plot
@@ -811,14 +815,13 @@ class tessreduce():
 			ind = self.ref > self._harshmask_counts
 			self.ref[ind]
 
-	def make_mask(self,cataloge_path,maglim=19,scale=1,strapsize=6,useref=False):
-
+	def make_mask(self,catalogue_path,maglim=19,scale=1,strapsize=6,useref=False):
 		# make a diagnostic plot for mask
 		data = strip_units(self.flux)
 		if useref:
-			mask, cat = Cat_mask(self.tpf,cataloge_path,maglim,scale,strapsize,ref=self.ref)
+			mask, cat = Cat_mask(self.tpf,catalogue_path,maglim,scale,strapsize,ref=self.ref)
 		else:
-			mask, cat = Cat_mask(self.tpf,cataloge_path,maglim,scale,strapsize)
+			mask, cat = Cat_mask(self.tpf,catalogue_path,maglim,scale,strapsize)
 		sky = ((mask & 1)+1 ==1) * 1.
 		sky[sky==0] = np.nan
 		tmp = np.nansum(data*sky,axis=(1,2))
@@ -1896,12 +1899,12 @@ class tessreduce():
 				print('made reference')
 			# make source mask
 			if mask is None:
-				self.make_mask(cataloge_path=self._catalogue_path,maglim=18,strapsize=7,scale=mask_scale)#Source_mask(ref,grid=0)
+				self.make_mask(catalogue_path=self._catalogue_path,maglim=18,strapsize=7,scale=mask_scale)#Source_mask(ref,grid=0)
 				frac = np.nansum((self.mask == 0) * 1.) / (self.mask.shape[0] * self.mask.shape[1])
 				#print('mask frac ',frac)
 				if frac < 0.05:
 					print('!!!WARNING!!! mask is too dense, lowering mask_scale to 0.5, and raising maglim to 15. Background quality will be reduced.')
-					self.make_mask(cataloge_path=self._catalogue_path,maglim=15,strapsize=7,scale=0.5)
+					self.make_mask(catalogue_path=self._catalogue_path,maglim=15,strapsize=7,scale=0.5)
 				if self.verbose > 0:
 					print('made source mask')
 			else:
@@ -1976,12 +1979,12 @@ class tessreduce():
 
 				self.ref -= self.bkg[self.ref_ind]
 				# remake mask
-				self.make_mask(cataloge_path=self._catalogue_path,maglim=18,strapsize=7,scale=mask_scale*.8,useref=True)#Source_mask(ref,grid=0)
+				self.make_mask(catalogue_path=self._catalogue_path,maglim=18,strapsize=7,scale=mask_scale*.8,useref=True)#Source_mask(ref,grid=0)
 				frac = np.nansum((self.mask== 0) * 1.) / (self.mask.shape[0] * self.mask.shape[1])
 				#print('mask frac ',frac)
 				if frac < 0.05:
 					print('!!!WARNING!!! mask is too dense, lowering mask_scale to 0.5, and raising maglim to 15. Background quality will be reduced.')
-					self.make_mask(cataloge_path=self._catalogue_path,maglim=15,strapsize=7,scale=0.5)
+					self.make_mask(catalogue_path=self._catalogue_path,maglim=15,strapsize=7,scale=0.5)
 				# assuming that the target is in the centre, so masking it out 
 				#m_tar = np.zeros_like(self.mask,dtype=int)
 				#m_tar[self.ref.shape[0]//2,self.ref.shape[1]//2]= 1
@@ -3021,7 +3024,6 @@ def Cat_mask(tpf,cataloge_path,maglim=19,scale=1,strapsize=3,badpix=None,ref=Non
 		8 - bad pixel (not used)
 	"""
 	from .cat_mask import Big_sat, gaia_auto_mask, ps1_auto_mask, Strap_mask
-	
 	gaia  = _load_external_cat(cataloge_path,maglim)
 	#if tpf.dec > -30:
 	#	pp,pm = Get_PS1(tpf,magnitude_limit=maglim)
